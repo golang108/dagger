@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/dagger/dagger/dagql"
 )
 
 func TestArtifactsFilterCoordinates(t *testing.T) {
@@ -87,17 +89,34 @@ func TestArtifactCoordinatesAreReadOnlyProjection(t *testing.T) {
 			{Name: ArtifactTypeDimension, KeyType: &TypeDef{Kind: TypeDefKindString}},
 		},
 		rows: []*Artifact{
-			{coordinates: []*string{ptr("go")}},
+			{
+				coordinates: []*string{ptr("go")},
+				selectors: []dagql.Selector{
+					{
+						Field: "go",
+						Args:  []dagql.NamedInput{{Name: "key", Value: dagql.String("unit")}},
+					},
+				},
+				collectionSelectors: []dagql.Selector{{Field: "tests"}},
+			},
 		},
 	}
 
 	item := artifacts.Items()[0]
 	coords := item.Coordinates()
 	*coords[0] = "js"
+	selectors := item.Selectors()
+	selectors[0].Field = "changed"
+	selectors[0].Args[0].Name = "changed"
+	collectionSelectors := item.CollectionSelectors()
+	collectionSelectors[0].Field = "changed"
 
 	value, ok := item.Coordinate(ArtifactTypeDimension)
 	require.True(t, ok)
 	require.Equal(t, "go", value)
+	require.Equal(t, "go", item.Selectors()[0].Field)
+	require.Equal(t, "key", item.Selectors()[0].Args[0].Name)
+	require.Equal(t, "tests", item.CollectionSelectors()[0].Field)
 	require.Same(t, artifacts, item.Scope())
 }
 

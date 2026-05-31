@@ -1261,7 +1261,222 @@ func (mod *Module) validateObjectTypeDef(ctx context.Context, typeDef dagql.Obje
 			}
 		}
 	}
+	if _, err := collectionDefinition(typeDef); err != nil {
+		return err
+	}
 	return nil
+}
+
+type collectionDefinitionInfo struct {
+	keysField dagql.ObjectResult[*FieldTypeDef]
+	keyType   dagql.ObjectResult[*TypeDef]
+	getFn     dagql.ObjectResult[*Function]
+	getArg    dagql.ObjectResult[*FunctionArg]
+	valueType dagql.ObjectResult[*TypeDef]
+}
+
+func collectionDefinition(typeDef dagql.ObjectResult[*TypeDef]) (*collectionDefinitionInfo, error) {
+	typeDefSelf := typeDef.Self()
+	if typeDefSelf == nil || !typeDefSelf.AsCollection.Valid {
+		return nil, nil
+	}
+	if typeDefSelf.Kind != TypeDefKindObject || !typeDefSelf.AsObject.Valid || typeDefSelf.AsObject.Value.Self() == nil {
+		return nil, fmt.Errorf("only object types can be marked as collections")
+	}
+
+	obj := typeDefSelf.AsObject.Value.Self()
+	collection := typeDefSelf.AsCollection.Value.Self()
+	if collection == nil {
+		return nil, fmt.Errorf("collection object %q has no collection metadata", obj.OriginalName)
+	}
+
+	keysFieldName := collection.KeysFieldNameOverride
+	if keysFieldName == "" {
+		keysFieldName = "keys"
+	}
+	keysField, ok := collectionObjectFieldByName(obj, keysFieldName)
+	if !ok {
+		return nil, fmt.Errorf("collection object %q must define exactly one effective keys field", obj.OriginalName)
+	}
+	keyType, err := validateCollectionKeysType(obj, keysFieldName, keysField.Self().TypeDef)
+	if err != nil {
+		return nil, err
+	}
+
+	getFunctionName := collection.GetFunctionNameOverride
+	if getFunctionName == "" {
+		getFunctionName = "get"
+	}
+	getFn, ok := collectionObjectFunctionByName(obj, getFunctionName)
+	if !ok {
+		return nil, fmt.Errorf("collection object %q must define exactly one effective get function", obj.OriginalName)
+	}
+	if len(getFn.Self().Args) != 1 {
+		return nil, fmt.Errorf("collection object %q get function %q must accept exactly one argument", obj.OriginalName, getFn.Self().OriginalName)
+	}
+
+	getArg := getFn.Self().Args[0]
+	if getArg.Self().TypeDef.Self().Optional {
+		return nil, fmt.Errorf("collection object %q get function %q argument %q must be non-null", obj.OriginalName, getFn.Self().OriginalName, getArg.Self().OriginalName)
+	}
+	if !isValidCollectionKeyType(getArg.Self().TypeDef.Self()) {
+		return nil, fmt.Errorf("collection object %q get function %q argument %q must use a scalar, custom scalar, or enum key type", obj.OriginalName, getFn.Self().OriginalName, getArg.Self().OriginalName)
+	}
+	if !typeDefsEqual(keyType.Self(), getArg.Self().TypeDef.Self()) {
+		return nil, fmt.Errorf("collection object %q get function %q argument %q must match keys field type", obj.OriginalName, getFn.Self().OriginalName, getArg.Self().OriginalName)
+	}
+
+	if getFn.Self().ReturnType.Self().Optional {
+		return nil, fmt.Errorf("collection object %q get function %q must return a non-null object", obj.OriginalName, getFn.Self().OriginalName)
+	}
+	if getFn.Self().ReturnType.Self().Kind != TypeDefKindObject || !getFn.Self().ReturnType.Self().AsObject.Valid {
+		return nil, fmt.Errorf("collection object %q get function %q must return an object", obj.OriginalName, getFn.Self().OriginalName)
+	}
+
+	return &collectionDefinitionInfo{
+		keysField: keysField,
+		keyType:   keyType,
+		getFn:     getFn,
+		getArg:    getArg,
+		valueType: getFn.Self().ReturnType,
+	}, nil
+}
+
+func collectionObjectFieldByName(obj *ObjectTypeDef, name string) (dagql.ObjectResult[*FieldTypeDef], bool) {
+	for _, field := range obj.Fields {
+		if field.Self() != nil && field.Self().Name == gqlFieldName(name) {
+			return field, true
+		}
+	}
+	return dagql.ObjectResult[*FieldTypeDef]{}, false
+}
+
+func collectionObjectFunctionByName(obj *ObjectTypeDef, name string) (dagql.ObjectResult[*Function], bool) {
+	for _, fn := range obj.Functions {
+		if fn.Self() != nil && fn.Self().Name == gqlFieldName(name) {
+			return fn, true
+		}
+	}
+	return dagql.ObjectResult[*Function]{}, false
+}
+
+func validateCollectionKeysType(obj *ObjectTypeDef, keysFieldName string, keysTypeDef dagql.ObjectResult[*TypeDef]) (dagql.ObjectResult[*TypeDef], error) {
+	keysType := keysTypeDef.Self()
+	if keysType.Optional {
+		return dagql.ObjectResult[*TypeDef]{}, fmt.Errorf("collection object %q keys field %q must be a non-null list", obj.OriginalName, keysFieldName)
+	}
+	if keysType.Kind != TypeDefKindList || !keysType.AsList.Valid || keysType.AsList.Value.Self() == nil {
+		return dagql.ObjectResult[*TypeDef]{}, fmt.Errorf("collection object %q keys field %q must be a list", obj.OriginalName, keysFieldName)
+	}
+
+	keyType := keysType.AsList.Value.Self().ElementTypeDef
+	if keyType.Self().Optional {
+		return dagql.ObjectResult[*TypeDef]{}, fmt.Errorf("collection object %q keys field %q must be a list of non-null keys", obj.OriginalName, keysFieldName)
+	}
+	if !isValidCollectionKeyType(keyType.Self()) {
+		return dagql.ObjectResult[*TypeDef]{}, fmt.Errorf("collection object %q keys field %q must use a scalar, custom scalar, or enum key type", obj.OriginalName, keysFieldName)
+	}
+	return keyType, nil
+}
+
+func isValidCollectionKeyType(typeDef *TypeDef) bool {
+	if typeDef == nil {
+		return false
+	}
+	switch typeDef.Kind {
+	case TypeDefKindString, TypeDefKindInteger, TypeDefKindFloat, TypeDefKindBoolean, TypeDefKindScalar, TypeDefKindEnum:
+		return true
+	default:
+		return false
+	}
+}
+
+func typeDefsEqual(a, b *TypeDef) bool {
+	return a != nil && b != nil && a.IsSubtypeOf(b) && b.IsSubtypeOf(a)
+}
+
+func (mod *Module) completeCollectionTypeDef(ctx context.Context, typeDef dagql.ObjectResult[*TypeDef]) (dagql.ObjectResult[*TypeDef], error) {
+	info, err := collectionDefinition(typeDef)
+	if err != nil || info == nil {
+		return typeDef, err
+	}
+	dag, err := CurrentDagqlServer(ctx)
+	if err != nil {
+		return typeDef, fmt.Errorf("current dagql server: %w", err)
+	}
+
+	collection := typeDef.Self().AsCollection.Value
+	applyType := func(field string, value dagql.ObjectResult[*TypeDef]) error {
+		valueID, err := ResultIDInput(value)
+		if err != nil {
+			return err
+		}
+		return dag.Select(ctx, collection, &collection, dagql.Selector{
+			Field: field,
+			Args:  []dagql.NamedInput{{Name: "typeDef", Value: valueID}},
+		})
+	}
+	if err := applyType("__withKeyType", info.keyType); err != nil {
+		return typeDef, fmt.Errorf("complete collection key type: %w", err)
+	}
+	if err := applyType("__withValueType", info.valueType); err != nil {
+		return typeDef, fmt.Errorf("complete collection value type: %w", err)
+	}
+	for _, update := range []struct {
+		field string
+		name  string
+	}{
+		{field: "__withKeysFieldName", name: info.keysField.Self().Name},
+		{field: "__withGetFunctionName", name: info.getFn.Self().Name},
+		{field: "__withGetArgName", name: info.getArg.Self().Name},
+	} {
+		if err := dag.Select(ctx, collection, &collection, dagql.Selector{
+			Field: update.field,
+			Args:  []dagql.NamedInput{{Name: "name", Value: dagql.String(update.name)}},
+		}); err != nil {
+			return typeDef, fmt.Errorf("complete collection %s: %w", update.field, err)
+		}
+	}
+	if batchObj := collectionBatchTypeDef(typeDef.Self().AsObject.Value.Self(), collection.Self()); batchObj != nil {
+		batchType, err := SelectTypeDefWithServer(ctx, dag, dagql.Selector{
+			Field: "withObject",
+			Args: []dagql.NamedInput{
+				{Name: "name", Value: dagql.String(batchObj.Name)},
+				{Name: "description", Value: dagql.String(batchObj.Description)},
+			},
+		})
+		if err != nil {
+			return typeDef, fmt.Errorf("complete collection batch type: %w", err)
+		}
+		for _, fn := range batchObj.Functions {
+			fnID, err := ResultIDInput(fn)
+			if err != nil {
+				return typeDef, fmt.Errorf("complete collection batch function: %w", err)
+			}
+			if err := dag.Select(ctx, batchType, &batchType, dagql.Selector{
+				Field: "withFunction",
+				Args:  []dagql.NamedInput{{Name: "function", Value: fnID}},
+			}); err != nil {
+				return typeDef, fmt.Errorf("complete collection batch function: %w", err)
+			}
+		}
+		if err := applyType("__withBatchType", batchType); err != nil {
+			return typeDef, fmt.Errorf("complete collection batch type: %w", err)
+		}
+	}
+
+	collectionID, err := ResultIDInput(collection)
+	if err != nil {
+		return typeDef, fmt.Errorf("complete collection id: %w", err)
+	}
+	updated := typeDef
+	if err := dag.Select(ctx, updated, &updated, dagql.Selector{
+		Field: "__withCollectionTypeDef",
+		Args:  []dagql.NamedInput{{Name: "collectionTypeDef", Value: collectionID}},
+	}); err != nil {
+		return typeDef, fmt.Errorf("complete collection typedef: %w", err)
+	}
+	return updated, nil
 }
 
 func (mod *Module) validateInterfaceTypeDef(ctx context.Context, typeDef dagql.ObjectResult[*TypeDef], state *moduleValidationState) error {
@@ -2227,6 +2442,9 @@ func (mod *userMod) install(ctx context.Context, dag *dagql.Server, opts ...Inst
 			Module:  mod.res,
 			TypeDef: objDef,
 		}
+		if def.Self().AsCollection.Valid {
+			obj.Collection = def.Self().AsCollection.Value.Self()
+		}
 		if err := obj.Install(ctx, dag, opts...); err != nil {
 			return err
 		}
@@ -2345,9 +2563,14 @@ func (mod *userMod) modTypeForObject(typeDef *TypeDef) (ModType, bool) {
 	self := mod.self()
 	for _, obj := range self.ObjectDefs {
 		if obj.Self().AsObject.Value.Self().Name == typeDef.AsObject.Value.Self().Name {
+			var collection *CollectionTypeDef
+			if obj.Self().AsCollection.Valid {
+				collection = obj.Self().AsCollection.Value.Self()
+			}
 			return &ModuleObjectType{
-				typeDef: obj.Self().AsObject.Value.Self(),
-				mod:     mod.res,
+				typeDef:    obj.Self().AsObject.Value.Self(),
+				collection: collection,
+				mod:        mod.res,
 			}, true
 		}
 	}
@@ -2452,6 +2675,11 @@ func (mod *Module) WithObject(ctx context.Context, def dagql.ObjectResult[*TypeD
 		if err != nil {
 			return nil, fmt.Errorf("failed to namespace type def: %w", err)
 		}
+	}
+	var err error
+	def, err = mod.completeCollectionTypeDef(ctx, def)
+	if err != nil {
+		return nil, fmt.Errorf("failed to complete collection type def: %w", err)
 	}
 
 	mod.ObjectDefs = append(mod.ObjectDefs, def)

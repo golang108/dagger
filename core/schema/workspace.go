@@ -230,7 +230,11 @@ func (s *workspaceSchema) artifacts(
 	if err != nil {
 		return nil, err
 	}
-	return core.NewWorkspaceArtifacts(mods)
+	dag, err := core.CurrentDagqlServer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return core.NewWorkspaceArtifacts(ctx, dag, mods)
 }
 
 func (s *workspaceSchema) artifactsFilterDimension(
