@@ -68,6 +68,7 @@ func (s *querySchema) Install(srv *dagql.Server) {
 	core.ReturnTypesEnum.Install(srv)
 	core.ModuleSourceExperimentalFeatures.Install(srv)
 	core.FunctionCachePolicyEnum.Install(srv)
+	core.VerbEnum.Install(srv)
 
 	dagql.MustInputSpec(PipelineLabel{}).Install(srv)
 	dagql.MustInputSpec(core.PortForward{}).Install(srv)
