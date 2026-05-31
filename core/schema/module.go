@@ -131,6 +131,22 @@ var moduleDirectives = []dagql.DirectiveSpec{
 		},
 	},
 	{
+		Name:        "keys",
+		Description: dagql.FormatDescription(`Marks a Dang object field as the keys field for a collection.`),
+		Args:        dagql.NewInputSpecs(),
+		Locations: []dagql.DirectiveLocation{
+			dagql.DirectiveLocationFieldDefinition,
+		},
+	},
+	{
+		Name:        "get",
+		Description: dagql.FormatDescription(`Marks a Dang object function as the lookup function for a collection.`),
+		Args:        dagql.NewInputSpecs(),
+		Locations: []dagql.DirectiveLocation{
+			dagql.DirectiveLocationFieldDefinition,
+		},
+	},
+	{
 		Name:        "check",
 		Description: dagql.FormatDescription(`Indicates that this function is a check.`),
 		Args:        dagql.NewInputSpecs(),
