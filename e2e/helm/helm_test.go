@@ -19,7 +19,6 @@
 // workspace:include ../../toolchains/cli-dev
 // workspace:include ../../toolchains/go
 // workspace:include ../../util
-// workspace:include ../../version
 package helm
 
 import (
