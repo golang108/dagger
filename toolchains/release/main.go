@@ -183,13 +183,7 @@ func (r *Release) Publish( //nolint:gocyclo
 		Name: "🚗 CLI",
 		Tag:  tag,
 	}
-	cliDev := dag.CliDev()
-	if version != "" {
-		cliDev = dag.CliDev(dagger.CliDevOpts{
-			Version:  version,
-			ImageTag: version,
-		})
-	}
+	cliDev := dag.CliDev(dagger.CliDevOpts{Version: version})
 	if !dryRun {
 		_, err := cliDev.
 			Publish(tag, goreleaserKey, githubOrgName, dagger.CliDevPublishOpts{
