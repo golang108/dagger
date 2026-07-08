@@ -1350,7 +1350,6 @@ func rootFieldsRequireFullWorkspaceSchema(fields []string) bool {
 			"__type",
 			"__schemaJSONFile",
 			"__workspaceModule",
-			"currentEnv",
 			"currentModule",
 			// currentTypeDefs returns the full served schema (bare `dagger
 			// functions`, the in-engine MCP/LLM tool builder), so it needs
@@ -1409,7 +1408,6 @@ func isCoreRootField(field string) bool {
 		"changeset",
 		"cloud",
 		"container",
-		"currentEnv",
 		"currentFunctionCall",
 		"currentModule",
 		// currentWorkspace's selector resolvers load on demand from their
