@@ -125,11 +125,9 @@ func (ModuleSuite) TestRuntimeDependencyDoesNotInheritWorkspace(ctx context.Cont
 		requireErrOut(t, err, "workspace arguments are not inherited by module runtime calls; pass a Workspace explicitly")
 	})
 
-	// B must not receive A's contextual workspace through currentWorkspace.
-	t.Run("currentWorkspace is not inherited by dependency", func(ctx context.Context, t *testctx.T) {
-		_, err := modGen.With(daggerQueryAt(".", `{currentWorkspaceFromDep}`)).Stdout(ctx)
-		requireErrOut(t, err, "no current workspace")
-	})
+	// The currentWorkspace vector is closed at the schema level: currentWorkspace
+	// is no longer exposed to module SDKs at all (#13659, covered by
+	// TestCurrentWorkspaceError), so a dependency cannot reach it to inherit one.
 }
 
 func (ModuleSuite) TestUseLocalMulti(ctx context.Context, t *testctx.T) {

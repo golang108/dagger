@@ -19,7 +19,3 @@ func (m *Dep) ReadWorkspaceArg(
 	}
 	return workspace.File("marker.txt").Contents(ctx)
 }
-
-func (m *Dep) ReadCurrentWorkspace(ctx context.Context) (string, error) {
-	return dag.CurrentWorkspace().File("marker.txt").Contents(ctx)
-}
